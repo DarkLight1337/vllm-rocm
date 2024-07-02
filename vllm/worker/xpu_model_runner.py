@@ -6,8 +6,8 @@ import torch.nn as nn
 
 from vllm.attention import get_attn_backend
 from vllm.config import (CacheConfig, DeviceConfig, LoadConfig, LoRAConfig,
-                         ModelConfig, ParallelConfig, SchedulerConfig,
-                         VisionLanguageConfig)
+                         ModelConfig, MultiModalConfig, ParallelConfig,
+                         SchedulerConfig)
 from vllm.distributed import broadcast_tensor_dict
 from vllm.logger import init_logger
 from vllm.model_executor.model_loader import get_model
@@ -80,7 +80,7 @@ class XPUModelRunner(ModelRunnerBase[ModelInputForXPU]):
         cache_config: CacheConfig,
         load_config: LoadConfig,
         lora_config: Optional[LoRAConfig],
-        vision_language_config: Optional[VisionLanguageConfig],
+        mm_config: Optional[MultiModalConfig],
         kv_cache_dtype: Optional[str] = "auto",
         is_driver_worker: bool = False,
         *args,
@@ -92,7 +92,7 @@ class XPUModelRunner(ModelRunnerBase[ModelInputForXPU]):
         self.lora_config = lora_config
         self.load_config = load_config
         self.cache_config = cache_config
-        self.vision_language_config = vision_language_config
+        self.mm_config = mm_config
         self.is_driver_worker = is_driver_worker
 
         self.sliding_window = model_config.get_sliding_window()
@@ -125,7 +125,7 @@ class XPUModelRunner(ModelRunnerBase[ModelInputForXPU]):
                 device_config=self.device_config,
                 load_config=self.load_config,
                 lora_config=self.lora_config,
-                vision_language_config=self.vision_language_config,
+                mm_config=self.mm_config,
                 parallel_config=self.parallel_config,
                 scheduler_config=self.scheduler_config,
                 cache_config=self.cache_config,
@@ -347,9 +347,8 @@ class XPUModelRunner(ModelRunnerBase[ModelInputForXPU]):
             "kv_caches": kv_caches,
             "attn_metadata": model_input.attn_metadata,
         }
-        if self.vision_language_config:
-            execute_model_kwargs.update(
-                {"image_input": model_input.multi_modal_input})
+        if model_input.multi_modal_input:
+            execute_model_kwargs.update(model_input.multi_modal_input)
 
         hidden_states = model_executable(**execute_model_kwargs)
 
@@ -432,9 +431,6 @@ class XPUModelRunner(ModelRunnerBase[ModelInputForXPU]):
                 slot_mapping.append(slot)
 
         if multi_modal_input_list:
-            assert self.vision_language_config, (
-                "Multi-modal inputs are only supported by "
-                "vision language models.")
             multi_modal_input = torch.cat(multi_modal_input_list,
                                           dim=0).to(self.device)
         else:

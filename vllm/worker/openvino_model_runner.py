@@ -1,4 +1,4 @@
-from typing import List, NamedTuple, Optional, Tuple
+from typing import Dict, List, NamedTuple, Optional, Tuple
 
 import openvino as ov
 import torch
@@ -7,8 +7,8 @@ from torch import nn
 from vllm.attention import get_attn_backend
 from vllm.attention.backends.openvino import OpenVINOAttentionMetadata
 from vllm.config import (CacheConfig, DeviceConfig, LoadConfig, LoRAConfig,
-                         ModelConfig, ParallelConfig, SchedulerConfig,
-                         VisionLanguageConfig)
+                         ModelConfig, MultiModalConfig, ParallelConfig,
+                         SchedulerConfig)
 from vllm.logger import init_logger
 from vllm.model_executor import SamplingMetadata
 from vllm.model_executor.model_loader.openvino import get_model
@@ -23,7 +23,7 @@ class ModelInput(NamedTuple):
     attn_metadata: Optional[OpenVINOAttentionMetadata]
     seq_lens: List[int]
     query_lens: List[int]
-    multi_modal_input: Optional[torch.Tensor]
+    multi_modal_input: Optional[Dict[str, torch.Tensor]]
 
     @classmethod
     def empty(cls, device):
@@ -46,7 +46,7 @@ class OpenVINOModelRunner:
         cache_config: CacheConfig,
         load_config: LoadConfig,
         lora_config: Optional[LoRAConfig],
-        vision_language_config: Optional[VisionLanguageConfig],
+        mm_config: Optional[MultiModalConfig],
         kv_cache_dtype: Optional[str] = "auto",
         is_driver_worker: bool = False,
         *args,
@@ -58,7 +58,7 @@ class OpenVINOModelRunner:
         self.device_config = device_config
         self.cache_config = cache_config
         self.lora_config = lora_config
-        self.vision_language_config = vision_language_config
+        self.mm_config = mm_config
         self.load_config = load_config
         self.is_driver_worker = is_driver_worker
 
@@ -263,9 +263,8 @@ class OpenVINOModelRunner:
     def prepare_input_tensors(
         self,
         seq_group_metadata_list: List[SequenceGroupMetadata],
-    ) -> Tuple[torch.Tensor, torch.Tensor, OpenVINOAttentionMetadata,
-               SamplingMetadata, Optional[torch.Tensor], ]:
-        multi_modal_input = None
+    ) -> Tuple[torch.Tensor, torch.Tensor, Optional[OpenVINOAttentionMetadata],
+               SamplingMetadata, Optional[Dict[str, torch.Tensor]]]:
 
         # Prepare input tensors.
         (
@@ -314,8 +313,8 @@ class OpenVINOModelRunner:
             "kv_caches": kv_caches,
             "attn_metadata": attn_metadata,
         }
-        if self.vision_language_config:
-            execute_model_kwargs.update({"image_input": multi_modal_input})
+        if multi_modal_input:
+            execute_model_kwargs.update(multi_modal_input)
 
         hidden_states = model_executable(**execute_model_kwargs)
 
